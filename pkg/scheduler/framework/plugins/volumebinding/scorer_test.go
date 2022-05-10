@@ -309,3 +309,113 @@ func TestScore(t *testing.T) {
 		})
 	}
 }
+
+func TestDynamicProvisionScore(t *testing.T) {
+	tests := []struct {
+		name          string
+		expectedScore int64
+		provisions    []*DynamicProvision
+	}{
+		{
+			name:          "1 PVC, 1 StorageClass",
+			expectedScore: 10,
+			provisions: []*DynamicProvision{
+				{
+					PVC:      makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+					Capacity: makeCapacity("test", waitClass, node1, "10Gi", ""),
+				},
+			},
+		},
+		{
+			name:          "2 PVC, 1 StorageClass",
+			expectedScore: 20,
+			provisions: []*DynamicProvision{
+				{
+					PVC:      makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+					Capacity: makeCapacity("test", waitClass, node1, "10Gi", ""),
+				},
+				{
+					PVC:      makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+					Capacity: makeCapacity("test", waitClass, node1, "10Gi", ""),
+				},
+			},
+		},
+		{
+			name:          "2 PVC, 2 StorageClass",
+			expectedScore: 20,
+			provisions: []*DynamicProvision{
+				{
+					PVC:      makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+					Capacity: makeCapacity("test", waitClass, node1, "10Gi", ""),
+				},
+				{
+					PVC:      makeTestPVC("test", "3Gi", "", pvcUnbound, "", "1", &waitClassWithProvisioner),
+					Capacity: makeCapacity("test", waitClassWithProvisioner, node1, "10Gi", ""),
+				},
+			},
+		},
+		{
+			name:          "4 PVC, 2 StorageClass",
+			expectedScore: 55,
+			provisions: []*DynamicProvision{
+				{
+					PVC:      makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+					Capacity: makeCapacity("test", waitClass, node1, "10Gi", ""),
+				},
+				{
+					PVC:      makeTestPVC("test", "5Gi", "", pvcUnbound, "", "1", &waitClass),
+					Capacity: makeCapacity("test", waitClass, node1, "10Gi", ""),
+				},
+				{
+					PVC:      makeTestPVC("test", "2Gi", "", pvcUnbound, "", "1", &waitClassWithProvisioner),
+					Capacity: makeCapacity("test", waitClassWithProvisioner, node1, "10Gi", ""),
+				},
+				{
+					PVC:      makeTestPVC("test", "3Gi", "", pvcUnbound, "", "1", &waitClassWithProvisioner),
+					Capacity: makeCapacity("test", waitClassWithProvisioner, node1, "10Gi", ""),
+				},
+			},
+		},
+		{
+			name:          "ignore no capacity provisions - 1",
+			expectedScore: 0,
+			provisions: []*DynamicProvision{
+				{
+					PVC: makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+				},
+			},
+		},
+		{
+			name:          "ignore no capacity provisions - 2",
+			expectedScore: 10,
+			provisions: []*DynamicProvision{
+				{
+					PVC: makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClass),
+				},
+				{
+					PVC:      makeTestPVC("test", "1Gi", "", pvcUnbound, "", "1", &waitClassWithProvisioner),
+					Capacity: makeCapacity("test", waitClassWithProvisioner, node1, "10Gi", ""),
+				},
+			},
+		},
+		{
+			name:          "0 provision - 1",
+			expectedScore: 0,
+			provisions:    []*DynamicProvision{},
+		},
+		{
+			name:          "0 provision - 2",
+			expectedScore: 0,
+			provisions:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotScore := dynamicProvisionScorerImpl(tt.provisions)
+			if gotScore != tt.expectedScore {
+				t.Errorf("Expect %d, but got %d", tt.expectedScore, gotScore)
+			}
+		})
+	}
+}

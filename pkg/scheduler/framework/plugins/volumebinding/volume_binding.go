@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	storagelisters "k8s.io/client-go/listers/storage/v1"
 	"k8s.io/component-helpers/storage/ephemeral"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
@@ -69,10 +70,12 @@ func (d *stateData) Clone() framework.StateData {
 // In the Filter phase, pod binding cache is created for the pod and used in
 // Reserve and PreBind phases.
 type VolumeBinding struct {
-	Binder    SchedulerVolumeBinder
-	PVCLister corelisters.PersistentVolumeClaimLister
-	scorer    volumeCapacityScorer
-	fts       feature.Features
+	Binder              SchedulerVolumeBinder
+	PVCLister           corelisters.PersistentVolumeClaimLister
+	classLister         storagelisters.StorageClassLister
+	scorer              volumeCapacityScorer
+	volumeBindindScorer dynamicProvisionScorer
+	fts                 feature.Features
 }
 
 var _ framework.PreFilterPlugin = &VolumeBinding{}
@@ -270,7 +273,8 @@ func (pl *VolumeBinding) Score(ctx context.Context, cs *framework.CycleState, po
 	if !ok {
 		return 0, nil
 	}
-	// group by storage class
+
+	// group static biding volumes by storage class
 	classResources := make(classResourceMap)
 	for _, staticBinding := range podVolumes.StaticBindings {
 		class := staticBinding.StorageClassName()
@@ -284,7 +288,14 @@ func (pl *VolumeBinding) Score(ctx context.Context, cs *framework.CycleState, po
 		classResources[class].Requested += storageResource.Requested
 		classResources[class].Capacity += storageResource.Capacity
 	}
-	return pl.scorer(classResources), nil
+
+	staticBindingScore := pl.scorer(classResources)
+	volumeBindingScore := pl.volumeBindindScorer(podVolumes.DynamicProvisions)
+	if staticBindingScore != 0 && volumeBindingScore != 0 {
+		score := (staticBindingScore + volumeBindingScore) / 2
+		return score, nil
+	}
+	return staticBindingScore + volumeBindingScore, nil
 }
 
 // ScoreExtensions of the Score plugin.
@@ -394,9 +405,11 @@ func New(plArgs runtime.Object, fh framework.Handle, fts feature.Features) (fram
 		scorer = buildScorerFunction(shape)
 	}
 	return &VolumeBinding{
-		Binder:    binder,
-		PVCLister: pvcInformer.Lister(),
-		scorer:    scorer,
-		fts:       fts,
+		Binder:              binder,
+		PVCLister:           pvcInformer.Lister(),
+		classLister:         storageClassInformer.Lister(),
+		scorer:              scorer,
+		volumeBindindScorer: dynamicProvisionScorerImpl,
+		fts:                 fts,
 	}, nil
 }
