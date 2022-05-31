@@ -70,12 +70,11 @@ func (d *stateData) Clone() framework.StateData {
 // In the Filter phase, pod binding cache is created for the pod and used in
 // Reserve and PreBind phases.
 type VolumeBinding struct {
-	Binder              SchedulerVolumeBinder
-	PVCLister           corelisters.PersistentVolumeClaimLister
-	classLister         storagelisters.StorageClassLister
-	scorer              volumeCapacityScorer
-	volumeBindindScorer dynamicProvisionScorer
-	fts                 feature.Features
+	Binder      SchedulerVolumeBinder
+	PVCLister   corelisters.PersistentVolumeClaimLister
+	classLister storagelisters.StorageClassLister
+	scorer      volumeCapacityScorer
+	fts         feature.Features
 }
 
 var _ framework.PreFilterPlugin = &VolumeBinding{}
@@ -289,13 +288,24 @@ func (pl *VolumeBinding) Score(ctx context.Context, cs *framework.CycleState, po
 		classResources[class].Capacity += storageResource.Capacity
 	}
 
-	staticBindingScore := pl.scorer(classResources)
-	volumeBindingScore := pl.volumeBindindScorer(podVolumes.DynamicProvisions)
-	if staticBindingScore != 0 && volumeBindingScore != 0 {
-		score := (staticBindingScore + volumeBindingScore) / 2
-		return score, nil
+	// add dynamic binding volumes by storage class
+	for _, provision := range podVolumes.DynamicProvisions {
+		if provision.Capacity == nil {
+			continue
+		}
+		class := *provision.PVC.Spec.StorageClassName
+		if _, ok := classResources[class]; !ok {
+			classResources[class] = &StorageResource{
+				Requested: 0,
+				Capacity:  0,
+			}
+		}
+		requestedQty := provision.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
+		classResources[class].Requested += requestedQty.Value()
+		classResources[class].Capacity += provision.Capacity.Capacity.Value()
 	}
-	return staticBindingScore + volumeBindingScore, nil
+
+	return pl.scorer(classResources), nil
 }
 
 // ScoreExtensions of the Score plugin.
@@ -405,11 +415,10 @@ func New(plArgs runtime.Object, fh framework.Handle, fts feature.Features) (fram
 		scorer = buildScorerFunction(shape)
 	}
 	return &VolumeBinding{
-		Binder:              binder,
-		PVCLister:           pvcInformer.Lister(),
-		classLister:         storageClassInformer.Lister(),
-		scorer:              scorer,
-		volumeBindindScorer: dynamicProvisionScorerImpl,
-		fts:                 fts,
+		Binder:      binder,
+		PVCLister:   pvcInformer.Lister(),
+		classLister: storageClassInformer.Lister(),
+		scorer:      scorer,
+		fts:         fts,
 	}, nil
 }
