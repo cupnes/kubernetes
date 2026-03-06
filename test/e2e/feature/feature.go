@@ -428,6 +428,10 @@ var (
 	// TODO: document the feature (when to use this feature for a test)
 	StorageProvider = framework.WithFeature(framework.ValidFeatures.Add("StorageProvider"))
 
+	// Owner: sig-storage
+	// Tests marked with this feature exercise scheduling behavior that scores nodes based on CSI storage capacity.
+	StorageCapacityScoring = framework.WithFeature(framework.ValidFeatures.Add("StorageCapacityScoring"))
+
 	// Owner: sig-api-machinery
 	// TODO: document the feature (when to use this feature for a test)
 	StorageVersionAPI = framework.WithFeature(framework.ValidFeatures.Add("StorageVersionAPI"))
